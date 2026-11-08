@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STAR DODGE — Game Mini</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(circle at top,#172554,#050816 65%);color:#fff;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:16px}
+.wrap{width:min(100%,520px);text-align:center}
+h1{margin:0 0 6px;font-size:clamp(28px,8vw,42px);letter-spacing:3px;color:#8be9ff;text-shadow:0 0 18px #22d3ee}
+.sub{color:#cbd5e1;margin:0 0 14px;font-size:14px}
+.hud{display:flex;justify-content:space-between;gap:8px;margin-bottom:9px}
+.pill{background:#111c36;border:1px solid #33466f;border-radius:12px;padding:9px 12px;flex:1;font-weight:bold}
+canvas{width:100%;height:auto;display:block;border:2px solid #42618e;border-radius:16px;background:#050b1c;box-shadow:0 0 28px #0ea5e955;touch-action:none}
+.actions{display:flex;gap:10px;justify-content:center;margin:12px 0}
+button{border:0;border-radius:12px;padding:12px 18px;font-weight:bold;font-size:15px;color:#071326;background:#67e8f9;cursor:pointer}
+button:active{transform:scale(.96)}
+.controls{display:flex;justify-content:center;gap:18px;margin-top:6px}
+.controls button{width:76px;height:55px;font-size:24px;background:#1e3a5f;color:white;border:1px solid #5b8cc4;touch-action:none}
+.hint{font-size:12px;color:#a9b8d0;margin-top:10px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>STAR DODGE</h1>
+<p class="sub">Hindari meteor, kumpulkan bintang, dan pecahkan rekor!</p>
+<div class="hud">
+<div class="pill">⭐ Skor: <span id="score">0</span></div>
+<div class="pill">❤️ Nyawa: <span id="lives">3</span></div>
+<div class="pill">🏆 Rekor: <span id="best">0</span></div>
+</div>
+<canvas id="game" width="480" height="620"></canvas>
+<div class="actions">
+<button id="start">▶ MULAI / ULANGI</button>
+<button id="pause">Ⅱ JEDA</button>
+</div>
+<div class="controls">
+<button id="left" aria-label="Kiri">◀</button>
+<button id="right" aria-label="Kanan">▶</button>
+</div>
+<p class="hint">Komputer: gunakan tombol ← → atau A / D.<br>HP: tahan tombol kiri dan kanan. Semakin tinggi skor, semakin sulit rintangannya!</p>
+</div>
+<script>
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),bestEl=document.getElementById('best');
+let player,rocks,stars,score,lives,running=false,paused=false,frame=0,keys={},best=Number(localStorage.getItem('starDodgeBest')||0);
+bestEl.textContent=best;
+
+function reset(){
+ player={x:220,y:540,w:40,h:42,speed:6};
+ rocks=[];stars=[];score=0;lives=3;frame=0;
+ scoreEl.textContent=0;livesEl.textContent=3;
+ running=true;paused=false;
+ document.getElementById('pause').textContent='Ⅱ JEDA';
+}
+function difficulty(){
+ // Naik satu tingkat setiap 50 poin, maksimal tingkat 12.
+ return Math.min(12,Math.floor(score/50));
+}
+function drawBackground(){
+ ctx.fillStyle='#050b1c';ctx.fillRect(0,0,480,620);
+ for(let i=0;i<65;i++){
+  let x=(i*79)%480,y=((i*137+frame*0.7)%620);
+  ctx.fillStyle=i%4===0?'#7dd3fc':'#64748b';
+  ctx.globalAlpha=.35+(i%3)*.2;ctx.fillRect(x,y,2,2);
+ }
+ ctx.globalAlpha=1;
+}
+function ship(){
+ ctx.save();ctx.translate(player.x+20,player.y+20);
+ ctx.shadowColor='#38bdf8';ctx.shadowBlur=18;ctx.fillStyle='#67e8f9';
+ ctx.beginPath();ctx.moveTo(0,-22);ctx.lineTo(18,17);ctx.lineTo(0,10);ctx.lineTo(-18,17);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#f0f9ff';ctx.beginPath();ctx.arc(0,-3,6,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#fb923c';ctx.beginPath();ctx.moveTo(-7,17);ctx.lineTo(0,30+Math.random()*7);ctx.lineTo(7,17);ctx.fill();
+ ctx.restore();
+}
+function spawn(){
+ const level=difficulty();
+ // Jarak kemunculan meteor makin pendek saat skor meningkat.
+ const spawnRate=Math.max(12,46-level*3);
+ if(frame%spawnRate===0){
+  const count=1+(level>=3?1:0)+(level>=7?1:0);
+  for(let i=0;i<count;i++){
+   rocks.push({
+    x:Math.random()*430+25,y:-30-Math.random()*100,
+    r:15+Math.random()*10+level*.25,
+    v:2.4+Math.random()*1.3+level*.32,
+    drift:(Math.random()-.5)*(0.5+level*.10)
+   });
+  }
+ }
+ // Bintang tetap muncul agar pemain punya kesempatan menambah skor.
+ if(frame%Math.max(55,95-level*2)===0)stars.push({x:20+Math.random()*440,y:-20,r:10,v:2.7+level*.08});
+}
+function circleHit(o){
+ let cx=Math.max(player.x,Math.min(o.x,player.x+player.w));
+ let cy=Math.max(player.y,Math.min(o.y,player.y+player.h));
+ return (o.x-cx)**2+(o.y-cy)**2<o.r**2;
+}
+function drawObjects(){
+ rocks.forEach(o=>{
+  ctx.shadowColor='#fb453f';ctx.shadowBlur=12;ctx.fillStyle='#ef4444';
+  ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+  ctx.fillStyle='#7f1d1d';ctx.beginPath();ctx.arc(o.x-5,o.y-4,o.r*.25,0,Math.PI*2);ctx.fill();
+ });
+ stars.forEach(o=>{
+  ctx.shadowColor='#fde047';ctx.shadowBlur=18;ctx.fillStyle='#fde047';
+  ctx.font='24px Arial';ctx.fillText('★',o.x-11,o.y+8);ctx.shadowBlur=0;
+ });
+}
+function draw(){
+ drawBackground();drawObjects();if(player)ship();
+ if(!running&&score===0){
+  ctx.fillStyle='#dbeafe';ctx.textAlign='center';ctx.font='bold 25px Arial';
+  ctx.fillText('SIAP UNTUK BERMAIN?',240,280);ctx.font='16px Arial';
+  ctx.fillText('Tekan tombol MULAI',240,315);ctx.textAlign='left';
+ }
+ // Tampilkan tingkat kesulitan.
+ ctx.fillStyle='#a5f3fc';ctx.font='bold 13px Arial';
+ ctx.fillText('LEVEL '+(difficulty()+1),14,24);
+}
+function endGame(){
+ running=false;
+ if(score>best){best=score;localStorage.setItem('starDodgeBest',best);bestEl.textContent=best}
+ draw();ctx.fillStyle='#020617dd';ctx.fillRect(35,225,410,170);
+ ctx.textAlign='center';ctx.fillStyle='#fda4af';ctx.font='bold 34px Arial';ctx.fillText('GAME OVER',240,280);
+ ctx.fillStyle='white';ctx.font='20px Arial';ctx.fillText('Skor kamu: '+score,240,320);
+ ctx.font='15px Arial';ctx.fillText('Tekan MULAI / ULANGI untuk bermain lagi',240,355);ctx.textAlign='left';
+}
+function update(){
+ if(!running||paused)return;
+ frame++;
+ if(keys.left)player.x-=player.speed;
+ if(keys.right)player.x+=player.speed;
+ player.x=Math.max(0,Math.min(440,player.x));
+ spawn();
+
+ // Meteor bergerak dan bergeser ke samping; kecepatan meningkat tiap level.
+ rocks.forEach(o=>{
+  o.y+=o.v;
+  o.x+=o.drift;
+  if(o.x<o.r||o.x>480-o.r)o.drift*=-1;
+ });
+ stars.forEach(o=>o.y+=o.v);
+
+ rocks=rocks.filter(o=>{
+  if(circleHit(o)){lives--;livesEl.textContent=lives;return false}
+  return o.y<660;
+ });
+ stars=stars.filter(o=>{
+  if(circleHit(o)){score+=10;scoreEl.textContent=score;return false}
+  return o.y<650;
+ });
+ if(frame%30===0){score++;scoreEl.textContent=score}
+ draw();
+ if(lives<=0){endGame();return}
+ requestAnimationFrame(update);
+}
+function start(){reset();draw();requestAnimationFrame(update)}
+document.getElementById('start').addEventListener('click',start);
+document.getElementById('pause').addEventListener('click',()=>{
+ if(!running)return;
+ paused=!paused;
+ document.getElementById('pause').textContent=paused?'▶ LANJUT':'Ⅱ JEDA';
+ if(!paused)requestAnimationFrame(update);
+ else{
+  ctx.fillStyle='#020617aa';ctx.fillRect(0,0,480,620);
+  ctx.fillStyle='white';ctx.textAlign='center';ctx.font='bold 34px Arial';
+  ctx.fillText('DIJEDA',240,310);ctx.textAlign='left';
+ }
+});
+document.addEventListener('keydown',e=>{
+ if(['ArrowLeft','ArrowRight','a','d','A','D'].includes(e.key))e.preventDefault();
+ if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=true;
+ if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=true;
+});
+document.addEventListener('keyup',e=>{
+ if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=false;
+ if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=false;
+});
+function hold(id,key){
+ let b=document.getElementById(id);
+ b.addEventListener('pointerdown',e=>{e.preventDefault();keys[key]=true});
+ ['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,()=>keys[key]=false));
+}
+hold('left','left');hold('right','right');draw();
+</script>
+</body>
+</html>
